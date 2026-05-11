@@ -32,10 +32,21 @@ class _LoginScreenState extends State<LoginScreen> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _loading = true);
 
-    final User? user = await _db.getUserByCredentials(
-      _identifierCtrl.text.trim(),
-      _passwordCtrl.text,
-    );
+    User? user;
+    try {
+      user = await _db.getUserByCredentials(
+        _identifierCtrl.text.trim(),
+        _passwordCtrl.text,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      UiHelpers.showError(
+        context,
+        'Connection error. Check your internet and try again.\n(${e.toString().split(']').last.trim()})',
+      );
+      return;
+    }
 
     if (!mounted) return;
     setState(() => _loading = false);
@@ -52,7 +63,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
     Navigator.pushReplacement(
       context,
-      MaterialPageRoute(builder: (_) => UserDashboard(user: user)),
+      MaterialPageRoute(builder: (_) => UserDashboard(user: user!)),
     );
   }
 

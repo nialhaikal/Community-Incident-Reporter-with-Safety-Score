@@ -50,8 +50,8 @@ class _UserDashboardState extends State<UserDashboard> {
           perm == LocationPermission.whileInUse) {
         pos = await Geolocator.getCurrentPosition(
           locationSettings: const LocationSettings(
-            accuracy: LocationAccuracy.low,
-            timeLimit: Duration(seconds: 6),
+            accuracy: LocationAccuracy.high,
+            timeLimit: Duration(seconds: 15),
           ),
         );
       }
@@ -81,12 +81,14 @@ class _UserDashboardState extends State<UserDashboard> {
       perm = await Geolocator.requestPermission();
     }
     if (perm != LocationPermission.always &&
-        perm != LocationPermission.whileInUse) return;
+        perm != LocationPermission.whileInUse) {
+      return;
+    }
 
     _positionSub = Geolocator.getPositionStream(
       locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.low,
-        distanceFilter: 100, // recalculate every 100 m
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 50,
       ),
     ).listen((pos) async {
       final score =
@@ -367,8 +369,8 @@ class _GoogleMapCardState extends State<_GoogleMapCard> {
           perm == LocationPermission.whileInUse) {
         final pos = await Geolocator.getCurrentPosition(
           locationSettings: const LocationSettings(
-            accuracy: LocationAccuracy.low,
-            timeLimit: Duration(seconds: 8),
+            accuracy: LocationAccuracy.high,
+            timeLimit: Duration(seconds: 15),
           ),
         );
         if (!mounted) return;
@@ -527,7 +529,15 @@ class _IncidentCard extends StatelessWidget {
     final typeColor = incidentTypeColor(incident.incidentType);
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
-      child: Padding(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => _IncidentLocationScreen(incident: incident),
+          ),
+        ),
+        child: Padding(
         padding: const EdgeInsets.all(14),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
@@ -591,6 +601,175 @@ class _IncidentCard extends StatelessWidget {
                 style: const TextStyle(color: Colors.grey, fontSize: 12)),
           ]),
         ]),
+        ),
+      ),
+    );
+  }
+}
+
+class _IncidentLocationScreen extends StatefulWidget {
+  final Incident incident;
+  const _IncidentLocationScreen({required this.incident});
+
+  @override
+  State<_IncidentLocationScreen> createState() =>
+      _IncidentLocationScreenState();
+}
+
+class _IncidentLocationScreenState extends State<_IncidentLocationScreen> {
+  GoogleMapController? _controller;
+  late final LatLng _target;
+  late final Set<Marker> _markers;
+
+  static IconData _iconFor(String type) {
+    switch (type) {
+      case 'Theft':               return Icons.money_off_rounded;
+      case 'Assault':             return Icons.personal_injury_rounded;
+      case 'Harassment':          return Icons.record_voice_over_rounded;
+      case 'Vandalism':           return Icons.broken_image_rounded;
+      case 'Suspicious Activity': return Icons.visibility_rounded;
+      case 'Road Accident':       return Icons.car_crash_rounded;
+      default:                    return Icons.warning_amber_rounded;
+    }
+  }
+
+  static Color _statusColor(String status) {
+    switch (status) {
+      case 'Pending':  return Colors.orange;
+      case 'Verified': return Colors.blue;
+      case 'Resolved': return Colors.green;
+      default:         return Colors.grey;
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _target = LatLng(widget.incident.latitude, widget.incident.longitude);
+    _markers = {
+      Marker(
+        markerId: const MarkerId('incident'),
+        position: _target,
+        icon: BitmapDescriptor.defaultMarkerWithHue(
+            _GoogleMapCardState._markerHue(widget.incident.incidentType)),
+        infoWindow: InfoWindow(
+          title: widget.incident.incidentType,
+          snippet:
+              '${widget.incident.reporterUsername ?? "Anonymous"} • ${widget.incident.status}',
+        ),
+      ),
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final inc = widget.incident;
+    final typeColor = incidentTypeColor(inc.incidentType);
+    final sc = _statusColor(inc.status);
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(inc.incidentType),
+        backgroundColor: typeColor,
+        foregroundColor: Colors.white,
+      ),
+      body: Stack(
+        children: [
+          GoogleMap(
+            initialCameraPosition: CameraPosition(target: _target, zoom: 17),
+            markers: _markers,
+            myLocationEnabled: true,
+            myLocationButtonEnabled: true,
+            zoomControlsEnabled: true,
+            mapToolbarEnabled: true,
+            onMapCreated: (c) {
+              _controller = c;
+              Future.delayed(const Duration(milliseconds: 600), () {
+                _controller
+                    ?.showMarkerInfoWindow(const MarkerId('incident'));
+              });
+            },
+          ),
+          Positioned(
+            bottom: 0,
+            left: 0,
+            right: 0,
+            child: Card(
+              margin: const EdgeInsets.all(12),
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: typeColor.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Icon(_iconFor(inc.incidentType),
+                            color: typeColor, size: 18),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(inc.incidentType,
+                            style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 15,
+                                color: typeColor)),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: sc.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: sc),
+                        ),
+                        child: Text(inc.status,
+                            style: TextStyle(
+                                color: sc,
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold)),
+                      ),
+                    ]),
+                    const SizedBox(height: 8),
+                    Text(inc.description,
+                        style:
+                            const TextStyle(fontSize: 13.5, height: 1.4)),
+                    const SizedBox(height: 8),
+                    Row(children: [
+                      const Icon(Icons.location_on_outlined,
+                          size: 14, color: Colors.grey),
+                      const SizedBox(width: 4),
+                      Text(
+                        '${inc.latitude.toStringAsFixed(4)}, '
+                        '${inc.longitude.toStringAsFixed(4)}',
+                        style: const TextStyle(
+                            color: Colors.grey, fontSize: 12),
+                      ),
+                      const Spacer(),
+                      const Icon(Icons.access_time_rounded,
+                          size: 14, color: Colors.grey),
+                      const SizedBox(width: 4),
+                      Text(inc.formattedTime,
+                          style: const TextStyle(
+                              color: Colors.grey, fontSize: 12)),
+                    ]),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Reported by ${inc.reporterUsername ?? "Anonymous"}',
+                      style:
+                          const TextStyle(color: Colors.grey, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -639,8 +818,8 @@ class _FullScreenMapScreenState extends State<_FullScreenMapScreen> {
           perm == LocationPermission.whileInUse) {
         final pos = await Geolocator.getCurrentPosition(
           locationSettings: const LocationSettings(
-            accuracy: LocationAccuracy.low,
-            timeLimit: Duration(seconds: 8),
+            accuracy: LocationAccuracy.high,
+            timeLimit: Duration(seconds: 15),
           ),
         );
         if (!mounted) return;
