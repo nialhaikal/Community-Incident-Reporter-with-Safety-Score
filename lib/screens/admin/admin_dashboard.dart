@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../database/database_helper.dart';
 import '../../models/incident.dart';
 import '../../models/user.dart';
+import '../../services/notification_service.dart';
 import '../../utils/ui_helpers.dart';
 import '../info_screen.dart';
 
@@ -75,6 +76,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
             ElevatedButton(
               onPressed: () async {
                 await _db.updateIncidentStatus(incident.id!, selected);
+                await NotificationService().showAdminStatusUpdated(
+                    incident.incidentType, selected);
                 if (ctx.mounted) Navigator.pop(ctx);
                 _load();
               },
@@ -106,6 +109,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
           ElevatedButton(
             onPressed: () async {
               await _db.deleteIncident(incident.id!);
+              await NotificationService()
+                  .showAdminIncidentDeleted(incident.incidentType);
               if (mounted) Navigator.pop(context);
               _load();
             },

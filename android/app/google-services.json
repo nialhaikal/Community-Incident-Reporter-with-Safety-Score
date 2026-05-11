@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "266655269440",
+    "project_id": "safezone-cb78f",
+    "storage_bucket": "safezone-cb78f.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:266655269440:android:1bf2d624031b4fbb34d5a5",
+        "android_client_info": {
+          "package_name": "com.example.community_incident_reporter_with_safety_score"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCGPJ48EdFJRe2F1SXEBusyjJEprb5bOek"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

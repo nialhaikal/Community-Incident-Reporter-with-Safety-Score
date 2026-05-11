@@ -1,8 +1,11 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../../database/database_helper.dart';
 import '../../models/incident.dart';
 import '../../models/user.dart';
+import '../../services/notification_service.dart';
 
 class ReportIncidentScreen extends StatefulWidget {
   final User user;
@@ -22,6 +25,7 @@ class _ReportIncidentScreenState extends State<ReportIncidentScreen> {
   double? _longitude;
   bool _loadingGps = false;
   bool _submitting = false;
+  GoogleMapController? _mapCtrl;
 
   static const List<String> _incidentTypes = [
     'Theft',
@@ -42,15 +46,64 @@ class _ReportIncidentScreenState extends State<ReportIncidentScreen> {
     super.dispose();
   }
 
-  Future<void> _getLocation() async {
-    setState(() => _loadingGps = true);
-    await Future.delayed(const Duration(seconds: 1));
+  void _useSimulatedLocation() {
     final rng = Random();
     setState(() {
       _latitude = _klCenterLat + (rng.nextDouble() - 0.5) * 0.05;
       _longitude = _klCenterLng + (rng.nextDouble() - 0.5) * 0.05;
       _loadingGps = false;
     });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('GPS unavailable — using approximate location.'),
+        backgroundColor: Colors.orange,
+        duration: Duration(seconds: 3),
+      ),
+    );
+  }
+
+  Future<void> _getLocation() async {
+    setState(() => _loadingGps = true);
+
+    // Check if location services are on
+    final bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      if (mounted) _useSimulatedLocation();
+      return;
+    }
+
+    // Check / request permission
+    LocationPermission permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) {
+        if (mounted) _useSimulatedLocation();
+        return;
+      }
+    }
+    if (permission == LocationPermission.deniedForever) {
+      if (mounted) _useSimulatedLocation();
+      return;
+    }
+
+    // Get actual GPS position
+    try {
+      final Position pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 10),
+        ),
+      );
+      final latlng = LatLng(pos.latitude, pos.longitude);
+      setState(() {
+        _latitude = pos.latitude;
+        _longitude = pos.longitude;
+        _loadingGps = false;
+      });
+      _mapCtrl?.animateCamera(CameraUpdate.newLatLngZoom(latlng, 16));
+    } catch (_) {
+      if (mounted) _useSimulatedLocation();
+    }
   }
 
   Future<void> _submit() async {
@@ -75,9 +128,13 @@ class _ReportIncidentScreenState extends State<ReportIncidentScreen> {
       longitude: _longitude!,
       timestamp: DateTime.now().toIso8601String(),
       status: 'Pending',
+      reporterUsername: widget.user.randomUsername,
+      reporterRealName: widget.user.realName,
+      reporterIcNumber: widget.user.icNumber,
     );
 
     await _db.insertIncident(incident);
+    await NotificationService().showIncidentSubmitted(_selectedType);
 
     if (!mounted) return;
     setState(() => _submitting = false);
@@ -162,14 +219,16 @@ class _ReportIncidentScreenState extends State<ReportIncidentScreen> {
                     : const Icon(Icons.my_location_rounded),
                 label: Text(_loadingGps
                     ? 'Acquiring GPS...'
-                    : 'Get Current Location (GPS)'),
+                    : _latitude != null
+                        ? 'Update Location'
+                        : 'Get Current Location (GPS)'),
                 style: OutlinedButton.styleFrom(
                   minimumSize: const Size.fromHeight(48),
                 ),
               ),
               const SizedBox(height: 8),
 
-              if (_latitude != null && _longitude != null)
+              if (_latitude != null && _longitude != null) ...[
                 Container(
                   padding: const EdgeInsets.symmetric(
                       horizontal: 14, vertical: 10),
@@ -192,6 +251,54 @@ class _ReportIncidentScreenState extends State<ReportIncidentScreen> {
                     ),
                   ]),
                 ),
+                const SizedBox(height: 8),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: SizedBox(
+                    height: 200,
+                    child: GoogleMap(
+                      initialCameraPosition: CameraPosition(
+                        target: LatLng(_latitude!, _longitude!),
+                        zoom: 16,
+                      ),
+                      markers: {
+                        Marker(
+                          markerId: const MarkerId('incident'),
+                          position: LatLng(_latitude!, _longitude!),
+                          draggable: true,
+                          infoWindow: InfoWindow(
+                            title: _selectedType,
+                            snippet: 'Drag pin to adjust exact location',
+                          ),
+                          onDragEnd: (pos) => setState(() {
+                            _latitude = pos.latitude;
+                            _longitude = pos.longitude;
+                          }),
+                        ),
+                      },
+                      myLocationEnabled: true,
+                      zoomControlsEnabled: false,
+                      mapToolbarEnabled: false,
+                      scrollGesturesEnabled: false,
+                      onMapCreated: (c) => _mapCtrl = c,
+                      onTap: (pos) {
+                        setState(() {
+                          _latitude = pos.latitude;
+                          _longitude = pos.longitude;
+                        });
+                        _mapCtrl?.animateCamera(
+                            CameraUpdate.newLatLng(pos));
+                      },
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                const Text(
+                  'Tap map to reposition  •  Drag the pin to fine-tune.',
+                  style: TextStyle(color: Colors.grey, fontSize: 11),
+                  textAlign: TextAlign.center,
+                ),
+              ],
 
               const SizedBox(height: 20),
 

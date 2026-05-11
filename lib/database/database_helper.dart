@@ -1,6 +1,5 @@
 import 'dart:math';
-import 'package:sqflite/sqflite.dart';
-import 'package:path/path.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/user.dart';
 import '../models/incident.dart';
 
@@ -9,109 +8,104 @@ class DatabaseHelper {
   factory DatabaseHelper() => _instance;
   DatabaseHelper._internal();
 
-  static Database? _database;
+  final FirebaseFirestore _db = FirebaseFirestore.instance;
 
-  Future<Database> get database async {
-    _database ??= await _initDatabase();
-    return _database!;
-  }
+  CollectionReference<Map<String, dynamic>> get _users =>
+      _db.collection('users');
+  CollectionReference<Map<String, dynamic>> get _incidents =>
+      _db.collection('incidents');
 
-  Future<Database> _initDatabase() async {
-    final dbPath = await getDatabasesPath();
-    final path = join(dbPath, 'safezone.db');
-    return openDatabase(path, version: 1, onCreate: _onCreate);
-  }
+  // ---------------------------------------------------------------------------
+  // Seed data — runs once on fresh Firestore database
+  // ---------------------------------------------------------------------------
 
-  Future<void> _onCreate(Database db, int version) async {
-    await db.execute('''
-      CREATE TABLE users (
-        id              INTEGER PRIMARY KEY AUTOINCREMENT,
-        ic_number       TEXT    NOT NULL UNIQUE,
-        real_name       TEXT    NOT NULL,
-        random_username TEXT    NOT NULL UNIQUE,
-        password        TEXT    NOT NULL,
-        role            TEXT    NOT NULL DEFAULT 'user'
-      )
-    ''');
+  Future<void> initSeedData() async {
+    final adminCheck = await _users
+        .where('role', isEqualTo: 'admin')
+        .limit(1)
+        .get();
+    if (adminCheck.docs.isNotEmpty) return;
 
-    await db.execute('''
-      CREATE TABLE incidents (
-        id            INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id       INTEGER NOT NULL,
-        incident_type TEXT    NOT NULL,
-        description   TEXT    NOT NULL,
-        latitude      REAL    NOT NULL,
-        longitude     REAL    NOT NULL,
-        timestamp     TEXT    NOT NULL,
-        status        TEXT    NOT NULL DEFAULT 'Pending',
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-      )
-    ''');
-
-    await db.insert('users', {
-      'ic_number': 'ADMIN001',
-      'real_name': 'System Administrator',
-      'random_username': 'admin',
+    await _users.add({
+      'icNumber': 'ADMIN001',
+      'realName': 'System Administrator',
+      'randomUsername': 'admin',
       'password': 'admin123',
       'role': 'admin',
     });
 
-    await db.insert('users', {
-      'ic_number': '990101145678',
-      'real_name': 'Ahmad Bin Abdullah',
-      'random_username': 'Citizen_842',
+    final demoRef = await _users.add({
+      'icNumber': '990101145678',
+      'realName': 'Ahmad Bin Abdullah',
+      'randomUsername': 'Citizen_842',
       'password': 'user123',
       'role': 'user',
     });
 
     final now = DateTime.now();
-    final seedIncidents = [
+    for (final seed in _seedIncidents(demoRef.id, now)) {
+      await _incidents.add(seed);
+    }
+  }
+
+  static List<Map<String, dynamic>> _seedIncidents(
+      String userId, DateTime now) {
+    const reporter = {
+      'reporterUsername': 'Citizen_842',
+      'reporterRealName': 'Ahmad Bin Abdullah',
+      'reporterIcNumber': '990101145678',
+    };
+    return [
       {
-        'user_id': 2,
-        'incident_type': 'Theft',
+        'userId': userId,
+        'incidentType': 'Theft',
         'description':
             'Phone snatching near the main bus stop. Perpetrator fled on motorcycle.',
         'latitude': 3.1390,
         'longitude': 101.6869,
         'timestamp': now.subtract(const Duration(hours: 2)).toIso8601String(),
         'status': 'Pending',
+        ...reporter,
       },
       {
-        'user_id': 2,
-        'incident_type': 'Suspicious Activity',
+        'userId': userId,
+        'incidentType': 'Suspicious Activity',
         'description':
             'A group of individuals loitering around the parking lot after midnight.',
         'latitude': 3.1415,
         'longitude': 101.6890,
         'timestamp': now.subtract(const Duration(hours: 6)).toIso8601String(),
         'status': 'Verified',
+        ...reporter,
       },
       {
-        'user_id': 2,
-        'incident_type': 'Harassment',
+        'userId': userId,
+        'incidentType': 'Harassment',
         'description':
             'Verbal harassment reported near the convenience store on Jalan Ampang.',
         'latitude': 3.1570,
         'longitude': 101.7200,
         'timestamp': now.subtract(const Duration(days: 1)).toIso8601String(),
         'status': 'Resolved',
+        ...reporter,
       },
       {
-        'user_id': 2,
-        'incident_type': 'Vandalism',
+        'userId': userId,
+        'incidentType': 'Vandalism',
         'description':
             'Public benches damaged and graffiti sprayed on the community notice board.',
         'latitude': 3.1320,
         'longitude': 101.6750,
         'timestamp': now.subtract(const Duration(days: 2)).toIso8601String(),
         'status': 'Pending',
+        ...reporter,
       },
     ];
-
-    for (final incident in seedIncidents) {
-      await db.insert('incidents', incident);
-    }
   }
+
+  // ---------------------------------------------------------------------------
+  // Username generator
+  // ---------------------------------------------------------------------------
 
   static String generateRandomUsername() {
     const adjectives = [
@@ -125,146 +119,97 @@ class DatabaseHelper {
       'Osprey', 'Jaguar', 'Condor', 'Raven', 'Drake',
     ];
     final rng = Random();
-    final number = rng.nextInt(9000) + 1000;
     final adj = adjectives[rng.nextInt(adjectives.length)];
     final noun = nouns[rng.nextInt(nouns.length)];
+    final number = rng.nextInt(9000) + 1000;
     return '$adj${noun}_$number';
   }
-
-  static String _thirtyDayCutoff() =>
-      DateTime.now().subtract(const Duration(days: 30)).toIso8601String();
 
   // ---------------------------------------------------------------------------
   // User CRUD
   // ---------------------------------------------------------------------------
 
-  Future<int> insertUser(User user) async {
-    final db = await database;
-    return db.insert('users', user.toMap(),
-        conflictAlgorithm: ConflictAlgorithm.abort);
+  Future<String> insertUser(User user) async {
+    final ref = await _users.add(user.toMap());
+    return ref.id;
   }
 
   Future<User?> getUserByCredentials(
       String identifier, String password) async {
-    final db = await database;
-    final maps = await db.query(
-      'users',
-      where: '(random_username = ? OR ic_number = ?) AND password = ?',
-      whereArgs: [identifier, identifier, password],
-    );
-    if (maps.isEmpty) return null;
-    return User.fromMap(maps.first);
+    // Try by randomUsername
+    var snap = await _users
+        .where('randomUsername', isEqualTo: identifier)
+        .where('password', isEqualTo: password)
+        .limit(1)
+        .get();
+    if (snap.docs.isNotEmpty) return User.fromDoc(snap.docs.first);
+
+    // Try by icNumber
+    snap = await _users
+        .where('icNumber', isEqualTo: identifier)
+        .where('password', isEqualTo: password)
+        .limit(1)
+        .get();
+    if (snap.docs.isEmpty) return null;
+    return User.fromDoc(snap.docs.first);
   }
 
-  Future<bool> _fieldExists(String column, String value) async {
-    final db = await database;
-    final result = await db.query(
-      'users',
-      columns: ['id'],
-      where: '$column = ?',
-      whereArgs: [value],
-      limit: 1,
-    );
-    return result.isNotEmpty;
+  Future<bool> icNumberExists(String icNumber) async {
+    final snap = await _users
+        .where('icNumber', isEqualTo: icNumber)
+        .limit(1)
+        .get();
+    return snap.docs.isNotEmpty;
   }
 
-  Future<bool> icNumberExists(String icNumber) =>
-      _fieldExists('ic_number', icNumber);
-
-  Future<bool> usernameExists(String username) =>
-      _fieldExists('random_username', username);
-
-  Future<List<User>> getAllUsers() async {
-    final db = await database;
-    final maps = await db.query('users', where: "role = 'user'");
-    return maps.map(User.fromMap).toList();
-  }
-
-  Future<int> updateUser(User user) async {
-    final db = await database;
-    return db.update('users', user.toMap(),
-        where: 'id = ?', whereArgs: [user.id]);
-  }
-
-  Future<int> deleteUser(int id) async {
-    final db = await database;
-    return db.delete('users', where: 'id = ?', whereArgs: [id]);
+  Future<bool> usernameExists(String username) async {
+    final snap = await _users
+        .where('randomUsername', isEqualTo: username)
+        .limit(1)
+        .get();
+    return snap.docs.isNotEmpty;
   }
 
   // ---------------------------------------------------------------------------
   // Incident CRUD
   // ---------------------------------------------------------------------------
 
-  Future<int> insertIncident(Incident incident) async {
-    final db = await database;
-    return db.insert('incidents', incident.toMap());
+  Future<void> insertIncident(Incident incident) async {
+    await _incidents.add(incident.toMap());
   }
 
-  /// All incidents joined with reporter info — for admin view.
+  /// All incidents ordered by time — for admin view (reporter info is denormalized).
   Future<List<Incident>> getAllIncidentsWithUser() async {
-    final db = await database;
-    final maps = await db.rawQuery('''
-      SELECT incidents.*,
-             users.random_username,
-             users.real_name,
-             users.ic_number
-      FROM incidents
-      JOIN users ON incidents.user_id = users.id
-      ORDER BY incidents.timestamp DESC
-    ''');
-    return maps.map(Incident.fromMap).toList();
+    final snap =
+        await _incidents.orderBy('timestamp', descending: true).get();
+    return snap.docs.map(Incident.fromDoc).toList();
   }
 
-  /// Incidents with anonymous join — for public user feed.
+  /// Public feed — excludes false reports, client-side filtered.
   Future<List<Incident>> getPublicIncidents() async {
-    final db = await database;
-    final maps = await db.rawQuery('''
-      SELECT incidents.*,
-             users.random_username
-      FROM incidents
-      JOIN users ON incidents.user_id = users.id
-      WHERE incidents.status != 'False Report'
-      ORDER BY incidents.timestamp DESC
-    ''');
-    return maps.map(Incident.fromMap).toList();
+    final snap =
+        await _incidents.orderBy('timestamp', descending: true).get();
+    return snap.docs
+        .map(Incident.fromDoc)
+        .where((i) => i.status != 'False Report')
+        .toList();
   }
 
   /// Incidents submitted by a specific user.
-  Future<List<Incident>> getIncidentsByUser(int userId) async {
-    final db = await database;
-    final maps = await db.rawQuery('''
-      SELECT incidents.*, users.random_username
-      FROM incidents
-      JOIN users ON incidents.user_id = users.id
-      WHERE incidents.user_id = ?
-      ORDER BY incidents.timestamp DESC
-    ''', [userId]);
-    return maps.map(Incident.fromMap).toList();
+  Future<List<Incident>> getIncidentsByUser(String userId) async {
+    final snap =
+        await _incidents.where('userId', isEqualTo: userId).get();
+    final list = snap.docs.map(Incident.fromDoc).toList();
+    list.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+    return list;
   }
 
-  Future<int> updateIncidentStatus(int id, String status) async {
-    final db = await database;
-    return db.update(
-      'incidents',
-      {'status': status},
-      where: 'id = ?',
-      whereArgs: [id],
-    );
+  Future<void> updateIncidentStatus(String id, String status) async {
+    await _incidents.doc(id).update({'status': status});
   }
 
-  Future<int> updateIncident(Incident incident) async {
-    final db = await database;
-    return db.update(
-      'incidents',
-      incident.toMap(),
-      where: 'id = ?',
-      whereArgs: [incident.id],
-    );
-  }
-
-  Future<int> deleteIncident(int id) async {
-    final db = await database;
-    return db.delete('incidents', where: 'id = ?', whereArgs: [id]);
+  Future<void> deleteIncident(String id) async {
+    await _incidents.doc(id).delete();
   }
 
   // ---------------------------------------------------------------------------
@@ -281,21 +226,52 @@ class DatabaseHelper {
     'Other': 5,
   };
 
-  /// Calculates the area safety score (0–100). Starts at 100 and subtracts
-  /// [_severityWeights] for each non-false-report incident in the last 30 days.
+  /// Calculates area safety score (0–100). Fetches all incidents and filters
+  /// client-side to avoid composite index requirements.
   Future<double> calculateSafetyScore() async {
-    final db = await database;
-    final maps = await db.query(
-      'incidents',
-      columns: ['incident_type'],
-      where: "timestamp > ? AND status != 'False Report'",
-      whereArgs: [_thirtyDayCutoff()],
-    );
+    final cutoff = DateTime.now().subtract(const Duration(days: 30));
+    final snap = await _incidents.get();
 
     double score = 100.0;
-    for (final row in maps) {
-      score -= _severityWeights[row['incident_type'] as String] ?? 5.0;
+    for (final doc in snap.docs) {
+      final data = doc.data();
+      if (data['status'] == 'False Report') continue;
+      final ts = DateTime.tryParse(data['timestamp'] as String? ?? '');
+      if (ts == null || ts.isBefore(cutoff)) continue;
+      score -= _severityWeights[data['incidentType'] as String? ?? ''] ?? 5.0;
     }
     return score.clamp(0.0, 100.0);
+  }
+
+  /// Location-aware safety score — only counts incidents within [radiusKm] of
+  /// the user's GPS position in the last 30 days.
+  Future<double> calculateSafetyScoreNear(
+      double lat, double lng, {double radiusKm = 3.0}) async {
+    final cutoff = DateTime.now().subtract(const Duration(days: 30));
+    final snap = await _incidents.get();
+
+    double score = 100.0;
+    for (final doc in snap.docs) {
+      final data = doc.data();
+      if (data['status'] == 'False Report') continue;
+      final ts = DateTime.tryParse(data['timestamp'] as String? ?? '');
+      if (ts == null || ts.isBefore(cutoff)) continue;
+      final iLat = (data['latitude'] as num?)?.toDouble() ?? 0;
+      final iLng = (data['longitude'] as num?)?.toDouble() ?? 0;
+      if (_haversineKm(lat, lng, iLat, iLng) > radiusKm) continue;
+      score -= _severityWeights[data['incidentType'] as String? ?? ''] ?? 5.0;
+    }
+    return score.clamp(0.0, 100.0);
+  }
+
+  static double _haversineKm(
+      double lat1, double lon1, double lat2, double lon2) {
+    const R = 6371.0;
+    final dLat = (lat2 - lat1) * pi / 180;
+    final dLon = (lon2 - lon1) * pi / 180;
+    final a = sin(dLat / 2) * sin(dLat / 2) +
+        cos(lat1 * pi / 180) * cos(lat2 * pi / 180) *
+            sin(dLon / 2) * sin(dLon / 2);
+    return R * 2 * atan2(sqrt(a), sqrt(1 - a));
   }
 }

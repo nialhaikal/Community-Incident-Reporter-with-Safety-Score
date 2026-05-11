@@ -1,8 +1,9 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 
 class Incident {
-  final int? id;
-  final int userId;
+  final String? id; // Firestore document ID
+  final String userId;
   final String incidentType;
   final String description;
   final double latitude;
@@ -10,7 +11,7 @@ class Incident {
   final String timestamp;
   final String status; // 'Pending', 'Verified', 'Resolved', 'False Report'
 
-  // Populated via JOIN queries — null for user-only queries
+  // Denormalized reporter info — stored directly in each incident document
   final String? reporterUsername;
   final String? reporterRealName;
   final String? reporterIcNumber;
@@ -39,34 +40,42 @@ class Incident {
     }
   }
 
-  Map<String, dynamic> toMap() => {
-        'id': id,
-        'user_id': userId,
-        'incident_type': incidentType,
-        'description': description,
-        'latitude': latitude,
-        'longitude': longitude,
-        'timestamp': timestamp,
-        'status': status,
-      };
+  Map<String, dynamic> toMap() {
+    final map = <String, dynamic>{
+      'userId': userId,
+      'incidentType': incidentType,
+      'description': description,
+      'latitude': latitude,
+      'longitude': longitude,
+      'timestamp': timestamp,
+      'status': status,
+    };
+    if (reporterUsername != null) map['reporterUsername'] = reporterUsername;
+    if (reporterRealName != null) map['reporterRealName'] = reporterRealName;
+    if (reporterIcNumber != null) map['reporterIcNumber'] = reporterIcNumber;
+    return map;
+  }
 
-  factory Incident.fromMap(Map<String, dynamic> map) => Incident(
-        id: map['id'] as int?,
-        userId: map['user_id'] as int,
-        incidentType: map['incident_type'] as String,
-        description: map['description'] as String,
-        latitude: (map['latitude'] as num).toDouble(),
-        longitude: (map['longitude'] as num).toDouble(),
-        timestamp: map['timestamp'] as String,
-        status: map['status'] as String,
-        reporterUsername: map['random_username'] as String?,
-        reporterRealName: map['real_name'] as String?,
-        reporterIcNumber: map['ic_number'] as String?,
-      );
+  factory Incident.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
+    final d = doc.data()!;
+    return Incident(
+      id: doc.id,
+      userId: d['userId'] as String,
+      incidentType: d['incidentType'] as String,
+      description: d['description'] as String,
+      latitude: (d['latitude'] as num).toDouble(),
+      longitude: (d['longitude'] as num).toDouble(),
+      timestamp: d['timestamp'] as String,
+      status: d['status'] as String,
+      reporterUsername: d['reporterUsername'] as String?,
+      reporterRealName: d['reporterRealName'] as String?,
+      reporterIcNumber: d['reporterIcNumber'] as String?,
+    );
+  }
 
   Incident copyWith({
-    int? id,
-    int? userId,
+    String? id,
+    String? userId,
     String? incidentType,
     String? description,
     double? latitude,

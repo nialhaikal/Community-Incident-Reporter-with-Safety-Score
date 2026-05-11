@@ -1,5 +1,7 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 class User {
-  final int? id;
+  final String? id; // Firestore document ID
   final String icNumber;
   final String realName;
   final String randomUsername;
@@ -16,25 +18,27 @@ class User {
   });
 
   Map<String, dynamic> toMap() => {
-        'id': id,
-        'ic_number': icNumber,
-        'real_name': realName,
-        'random_username': randomUsername,
+        'icNumber': icNumber,
+        'realName': realName,
+        'randomUsername': randomUsername,
         'password': password,
         'role': role,
       };
 
-  factory User.fromMap(Map<String, dynamic> map) => User(
-        id: map['id'] as int?,
-        icNumber: map['ic_number'] as String,
-        realName: map['real_name'] as String,
-        randomUsername: map['random_username'] as String,
-        password: map['password'] as String,
-        role: map['role'] as String,
-      );
+  factory User.fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
+    final d = doc.data()!;
+    return User(
+      id: doc.id,
+      icNumber: d['icNumber'] as String,
+      realName: d['realName'] as String,
+      randomUsername: d['randomUsername'] as String,
+      password: d['password'] as String,
+      role: d['role'] as String,
+    );
+  }
 
   User copyWith({
-    int? id,
+    String? id,
     String? icNumber,
     String? realName,
     String? randomUsername,
