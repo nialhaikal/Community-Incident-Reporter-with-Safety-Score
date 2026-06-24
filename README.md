@@ -1,3 +1,3 @@
-# community_incident_reporter_with_safety_score
+# SafeZone: Community Incident Reporter with Safety Score
 
-A new Flutter project.
+SafeZone is a Flutter-based Android mobile application that empowers citizens to anonymously report community incidents and receive real-time safety assessments of their surroundings. The application bridges the gap between community members and local safety awareness by creating a crowd-sourced incident database that is verified by administrators.  By providing a structured, pseudonymous reporting platform, SafeZone lowers the barrier for citizens to submit safety concerns while maintaining data integrity through an administrative verification workflow. The project proudly aligns with UN Sustainable Development Goal (SDG) 16: Peace, Justice and Strong Institutions. 
